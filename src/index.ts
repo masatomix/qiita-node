@@ -1,4 +1,5 @@
 import request, { Response } from 'request'
+import moment from 'moment-timezone'
 
 const access_token = 'xxx'
 
@@ -44,13 +45,15 @@ function getViews(id: string): Promise<any> {
 
 // https://qiita.com/notakaos/items/3bbd2293e2ff286d9f49
 
+// $ npx ts-node src/index.ts         -> コンソール出力のみ
+// $ npx ts-node src/index.ts true    -> tick_qiita に追加POST
+// $ npx ts-node src/index.ts true qiita  -> qiita にPOST(記事ID_YYYYMMDD をIDとして存在したらUpdate)
+
 if (!module.parent) {
   const dest = process.argv[3] ? process.argv[3] : 'tick_qiita'
   const postFlag = process.argv[2] ? process.argv[2].toLowerCase() === 'true' : false
   // console.log(postFlag)
   // console.log(dest)
-
-  const elastic_url = `http://192.168.10.200:9202/${dest}/_doc/`
 
   async function main() {
     for (let number = 1; number < 30; number++) {
@@ -66,9 +69,9 @@ if (!module.parent) {
 
       for (const item of filtered) {
         const result = await getViews(item.id)
-        // console.log(result);
+        const now = moment()
         const postData = {
-          baseDate: new Date(),
+          baseDate: now.toDate(),
           id: result.id,
           created_at: result.created_at,
           updated_at: result.updated_at,
@@ -79,6 +82,11 @@ if (!module.parent) {
           url: result.url,
         }
         if (postFlag) {
+          // destが tick_qiita のときだけは、都度追加。それ以外は、記事ID_YYYYMMDDと日毎のデータを蓄積
+          const elastic_url =
+            dest === 'tick_qiita'
+              ? `http://192.168.10.200:9202/${dest}/_doc/`
+              : `http://192.168.10.200:9202/${dest}/_doc/${result.id}_${now.format('YYYYMMDD')}`
           postLog(elastic_url, postData)
         } else {
           console.log(postData)

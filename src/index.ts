@@ -43,6 +43,25 @@ export interface User {
   website_url: string
 }
 
+export interface Stocker {
+  description: string
+  facebook_id: string
+  followees_count: number
+  followers_count: number
+  github_login_name: string
+  id: string
+  items_count: number
+  linkedin_id: string
+  location: string
+  name: string
+  organization: string
+  permanent_id: number
+  profile_image_url: string
+  team_only: boolean
+  twitter_screen_name: string
+  website_url: string
+}
+
 export interface QiitaData {
   baseDate: Date
   id: string
@@ -53,6 +72,7 @@ export interface QiitaData {
   likes_count: number
   tags: string[]
   url: string
+  stockers_count: number
 }
 
 function getListPromise(access_token: string, pageNumber: number, per_page: number): Promise<Array<Item>> {
@@ -99,6 +119,26 @@ function getViewPromise(access_token: string, id: string): Promise<Item> {
   return promise
 }
 
+function getStockersPromise(access_token: string, id: string): Promise<Array<Stocker>> {
+  const auth_options = {
+    uri: `https://qiita.com/api/v2/items/${id}/stockers`,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${access_token}`,
+    },
+  }
+  const promise: Promise<Array<Stocker>> = new Promise((resolve, reject) => {
+    request.get(auth_options, (err: any, _response: Response, body: any): void => {
+      if (err) {
+        reject(err)
+        return
+      }
+      resolve(JSON.parse(body))
+    })
+  })
+  return promise
+}
+
 // https://qiita.com/notakaos/items/3bbd2293e2ff286d9f49
 
 // $ npx ts-node src/index.ts xxx         -> コンソール出力のみ
@@ -117,7 +157,8 @@ if (!module.parent) {
   // console.log(dest)
 
   async function main() {
-    for (let number = 1; number < 5; number++) { // デフォルト100x5記事までは検索する
+    for (let number = 1; number < 5; number++) {
+      // デフォルト100x5記事までは検索する
       const itemList: Array<Item> = await getListPromise(access_token, number, per_page)
       // const filtered = itemList.filter((item) => {
       //   // // UiPath タグが付いてる場合OK
@@ -128,18 +169,22 @@ if (!module.parent) {
       //   return true
       // })
 
+      const now = moment()
+      const baseDate = now.toDate()
+      const baseDateStr = now.format('YYYYMMDD')
       for (const item of itemList) {
         // itemList のItemには、page_views_countが入っていないので個別に取得する必要がある。
-        const result: Item = await getViewPromise(access_token, item.id)
-        const now = moment()
+        const resultWithViewCount: Item = await getViewPromise(access_token, item.id)
+        const stockers: Array<Stocker> = await getStockersPromise(access_token, item.id)
         const postData: QiitaData = {
-          baseDate: now.toDate(),
+          baseDate: baseDate,
           id: item.id,
           created_at: item.created_at,
           updated_at: item.updated_at,
           title: item.title,
-          page_views_count: result.page_views_count,
+          page_views_count: resultWithViewCount.page_views_count,
           likes_count: item.likes_count,
+          stockers_count: stockers.length,
           tags: item.tags.map((tag: any) => tag.name),
           url: item.url,
         }
@@ -148,7 +193,7 @@ if (!module.parent) {
           const elastic_url =
             dest === 'tick_qiita'
               ? `http://192.168.10.200:9202/${dest}/_doc/`
-              : `http://192.168.10.200:9202/${dest}/_doc/${result.id}_${now.format('YYYYMMDD')}`
+              : `http://192.168.10.200:9202/${dest}/_doc/${item.id}_${baseDateStr}`
           postLog(elastic_url, postData)
         } else {
           console.log(postData)

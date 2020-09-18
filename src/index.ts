@@ -43,6 +43,25 @@ export interface User {
   website_url: string
 }
 
+// export interface Stocker {
+//   description: string
+//   facebook_id: string
+//   followees_count: number
+//   followers_count: number
+//   github_login_name: string
+//   id: string
+//   items_count: number
+//   linkedin_id: string
+//   location: string
+//   name: string
+//   organization: string
+//   permanent_id: number
+//   profile_image_url: string
+//   team_only: boolean
+//   twitter_screen_name: string
+//   website_url: string
+// }
+
 export interface QiitaData {
   baseDate: Date
   id: string
@@ -53,6 +72,7 @@ export interface QiitaData {
   likes_count: number
   tags: string[]
   url: string
+  stockers_count: number
 }
 
 function getListPromise(access_token: string, pageNumber: number, per_page: number): Promise<Array<Item>> {
@@ -99,25 +119,51 @@ function getViewPromise(access_token: string, id: string): Promise<Item> {
   return promise
 }
 
+function getStockersCountPromise(access_token: string, id: string): Promise<number> {
+  const auth_options = {
+    uri: `https://qiita.com/api/v2/items/${id}/stockers`,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      Authorization: `Bearer ${access_token}`,
+    },
+  }
+  const promise: Promise<number> = new Promise((resolve, reject) => {
+    request.get(auth_options, (err: any, response: Response, body: any): void => {
+      if (err) {
+        reject(err)
+        return
+      }
+      const totalCount: number = Number(response.headers['total-count'])
+      resolve(totalCount)
+    })
+  })
+  return promise
+}
+
 // https://qiita.com/notakaos/items/3bbd2293e2ff286d9f49
 
 // $ npx ts-node src/index.ts xxx         -> コンソール出力のみ
 // $ npx ts-node src/index.ts xxx true    -> tick_qiita に追加POST
 // $ npx ts-node src/index.ts xxx true qiita  -> qiita にPOST(記事ID_YYYYMMDD をIDとして存在したらUpdate)
+// $ npx ts-node src/index.ts xxx false qiita 5  -> qiita にPOST(記事ID_YYYYMMDD をIDとして存在したらUpdate)。 5x4件だけ検索(4はfor文の、1〜4)
 
 if (!module.parent) {
   const access_token = process.argv[2]
   const postFlagArg = process.argv[3]
   const destArg = process.argv[4]
-  const per_page = 100
+  const per_pageArg = process.argv[5]
 
   const dest = destArg ? destArg : 'tick_qiita'
   const postFlag = postFlagArg ? postFlagArg.toLowerCase() === 'true' : false
+  const per_page = per_pageArg ? Number(per_pageArg) : 100 // 引数に数値があったらそれで置き換えるけどデフォルト値は100
+
+  // console.log(per_page)
   // console.log(postFlag)
   // console.log(dest)
 
   async function main() {
-    for (let number = 1; number < 5; number++) { // デフォルト100x5記事までは検索する
+    for (let number = 1; number < 5; number++) {
+      // デフォルト100x4記事までは検索する
       const itemList: Array<Item> = await getListPromise(access_token, number, per_page)
       // const filtered = itemList.filter((item) => {
       //   // // UiPath タグが付いてる場合OK
@@ -128,19 +174,23 @@ if (!module.parent) {
       //   return true
       // })
 
+      const now = moment()
+      const baseDate = now.toDate()
+      const baseDateStr = now.format('YYYYMMDD')
       for (const item of itemList) {
         // itemList のItemには、page_views_countが入っていないので個別に取得する必要がある。
-        const result: Item = await getViewPromise(access_token, item.id)
-        const now = moment()
+        const resultWithViewCount: Item = await getViewPromise(access_token, item.id)
+        const stockersCount: number = await getStockersCountPromise(access_token, item.id)
         const postData: QiitaData = {
-          baseDate: now.toDate(),
+          baseDate: baseDate,
           id: item.id,
           created_at: item.created_at,
           updated_at: item.updated_at,
           title: item.title,
-          page_views_count: result.page_views_count,
+          page_views_count: resultWithViewCount.page_views_count,
           likes_count: item.likes_count,
-          tags: item.tags.map((tag: any) => tag.name),
+          stockers_count: stockersCount,
+          tags: item.tags.map((tag) => tag.name),
           url: item.url,
         }
         if (postFlag) {
@@ -148,7 +198,7 @@ if (!module.parent) {
           const elastic_url =
             dest === 'tick_qiita'
               ? `http://192.168.10.200:9202/${dest}/_doc/`
-              : `http://192.168.10.200:9202/${dest}/_doc/${result.id}_${now.format('YYYYMMDD')}`
+              : `http://192.168.10.200:9202/${dest}/_doc/${item.id}_${baseDateStr}`
           postLog(elastic_url, postData)
         } else {
           console.log(postData)
@@ -165,7 +215,7 @@ if (!module.parent) {
   main()
 }
 
-export const postLog = (elastic_url: string, postData: any) => {
+export const postLog = (elastic_url: string, postData: QiitaData) => {
   const option = {
     url: elastic_url,
     method: 'POST',

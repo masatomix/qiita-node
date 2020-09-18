@@ -43,24 +43,24 @@ export interface User {
   website_url: string
 }
 
-export interface Stocker {
-  description: string
-  facebook_id: string
-  followees_count: number
-  followers_count: number
-  github_login_name: string
-  id: string
-  items_count: number
-  linkedin_id: string
-  location: string
-  name: string
-  organization: string
-  permanent_id: number
-  profile_image_url: string
-  team_only: boolean
-  twitter_screen_name: string
-  website_url: string
-}
+// export interface Stocker {
+//   description: string
+//   facebook_id: string
+//   followees_count: number
+//   followers_count: number
+//   github_login_name: string
+//   id: string
+//   items_count: number
+//   linkedin_id: string
+//   location: string
+//   name: string
+//   organization: string
+//   permanent_id: number
+//   profile_image_url: string
+//   team_only: boolean
+//   twitter_screen_name: string
+//   website_url: string
+// }
 
 export interface QiitaData {
   baseDate: Date
@@ -119,7 +119,7 @@ function getViewPromise(access_token: string, id: string): Promise<Item> {
   return promise
 }
 
-function getStockersPromise(access_token: string, id: string): Promise<Array<Stocker>> {
+function getStockersCountPromise(access_token: string, id: string): Promise<number> {
   const auth_options = {
     uri: `https://qiita.com/api/v2/items/${id}/stockers`,
     headers: {
@@ -127,13 +127,14 @@ function getStockersPromise(access_token: string, id: string): Promise<Array<Sto
       Authorization: `Bearer ${access_token}`,
     },
   }
-  const promise: Promise<Array<Stocker>> = new Promise((resolve, reject) => {
-    request.get(auth_options, (err: any, _response: Response, body: any): void => {
+  const promise: Promise<number> = new Promise((resolve, reject) => {
+    request.get(auth_options, (err: any, response: Response, body: any): void => {
       if (err) {
         reject(err)
         return
       }
-      resolve(JSON.parse(body))
+      const totalCount: number = Number(response.headers['total-count'])
+      resolve(totalCount)
     })
   })
   return promise
@@ -144,21 +145,25 @@ function getStockersPromise(access_token: string, id: string): Promise<Array<Sto
 // $ npx ts-node src/index.ts xxx         -> コンソール出力のみ
 // $ npx ts-node src/index.ts xxx true    -> tick_qiita に追加POST
 // $ npx ts-node src/index.ts xxx true qiita  -> qiita にPOST(記事ID_YYYYMMDD をIDとして存在したらUpdate)
+// $ npx ts-node src/index.ts xxx false qiita 5  -> qiita にPOST(記事ID_YYYYMMDD をIDとして存在したらUpdate)。 5x4件だけ検索(4はfor文の、1〜4)
 
 if (!module.parent) {
   const access_token = process.argv[2]
   const postFlagArg = process.argv[3]
   const destArg = process.argv[4]
-  const per_page = 100
+  const per_pageArg = process.argv[5]
 
   const dest = destArg ? destArg : 'tick_qiita'
   const postFlag = postFlagArg ? postFlagArg.toLowerCase() === 'true' : false
+  const per_page = per_pageArg ? Number(per_pageArg) : 100 // 引数に数値があったらそれで置き換えるけどデフォルト値は100
+
+  // console.log(per_page)
   // console.log(postFlag)
   // console.log(dest)
 
   async function main() {
     for (let number = 1; number < 5; number++) {
-      // デフォルト100x5記事までは検索する
+      // デフォルト100x4記事までは検索する
       const itemList: Array<Item> = await getListPromise(access_token, number, per_page)
       // const filtered = itemList.filter((item) => {
       //   // // UiPath タグが付いてる場合OK
@@ -175,7 +180,7 @@ if (!module.parent) {
       for (const item of itemList) {
         // itemList のItemには、page_views_countが入っていないので個別に取得する必要がある。
         const resultWithViewCount: Item = await getViewPromise(access_token, item.id)
-        const stockers: Array<Stocker> = await getStockersPromise(access_token, item.id)
+        const stockersCount: number = await getStockersCountPromise(access_token, item.id)
         const postData: QiitaData = {
           baseDate: baseDate,
           id: item.id,
@@ -184,8 +189,8 @@ if (!module.parent) {
           title: item.title,
           page_views_count: resultWithViewCount.page_views_count,
           likes_count: item.likes_count,
-          stockers_count: stockers.length,
-          tags: item.tags.map((tag: any) => tag.name),
+          stockers_count: stockersCount,
+          tags: item.tags.map((tag) => tag.name),
           url: item.url,
         }
         if (postFlag) {
@@ -210,7 +215,7 @@ if (!module.parent) {
   main()
 }
 
-export const postLog = (elastic_url: string, postData: any) => {
+export const postLog = (elastic_url: string, postData: QiitaData) => {
   const option = {
     url: elastic_url,
     method: 'POST',
